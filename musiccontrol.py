@@ -1,7 +1,9 @@
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 import logging
 import wavelink
+
+import datetime
 
 from functools import wraps
 
@@ -15,6 +17,7 @@ class Music(commands.Cog):
     self.vc = None
     self.last_channel = None
     self.skipped = None
+    self.last_action = None
 
   def vc_expected(f):
     @wraps(f)
@@ -25,6 +28,14 @@ class Music(commands.Cog):
       else:
         return await f(self, ctx, *args, **kwargs)
     return wrapped
+  
+  def action(f):
+    @wraps(f)
+    async def wrapped(self, ctx, *args, **kwargs):
+      self.last_action = datetime.datetime.now()
+      return await f(self, ctx, *args, **kwargs)
+    return wrapped
+
 
   @commands.Cog.listener()
   async def on_ready(self):
@@ -54,9 +65,32 @@ class Music(commands.Cog):
     node: wavelink.Node = wavelink.Node(uri=CONFIG.LAVALINK_URI, password=CONFIG.LAVALINK_PASSWORD)
     await wavelink.Pool.connect(client=self.bot, nodes=[node])
     logging.info("Lavalink connected and ready!")
+
+  @tasks.loop(minutes = 1)
+  async def leave_if_inactive(self):
+    if self.last_action is None:
+      return
+    
+    now = datetime.datetime.now()
+    diff = now - self.last_action
+
+    TIMEOUT = datetime.timedelta(minutes=15)
+    if diff > TIMEOUT:
+      if self.vc is not None and self.vc.connected():
+        await self.vc.disconnect()
+        self.vc = None
+        self.last_action = None
+
+        if self.last_channel is not None:
+          await self.last_channel.send("Bot has been inactive for the last 15 minutes. Leaving channel.")
+        
+
+
+
   
   @commands.slash_command(name="np", description="Displays the currently playing song.")
   @vc_expected
+  @action
   async def now_playing(self, ctx):
     if not self.vc.playing:
       await ctx.respond("Nothing is playing.")
@@ -66,6 +100,7 @@ class Music(commands.Cog):
 
   @commands.slash_command(name="pause", description="Toggles pausing/playing songs.")
   @vc_expected
+  @action
   async def pause(self, ctx):
     if self.vc.paused:
       await self.vc.pause(False)
@@ -76,17 +111,20 @@ class Music(commands.Cog):
 
   @commands.slash_command(name="queue", description="Displays the queue.")
   @vc_expected
+  @action
   async def queue(self, ctx):
     await ctx.respond(embed=create_queue_embed(self.vc))
 
   @commands.slash_command(name="stop", description="Stops the music.")
   @vc_expected
+  @action
   async def stop(self, ctx):
     await self.vc.stop()
     await ctx.respond("Stopped.")
 
   @commands.slash_command(name="skip", description="Skips the playing song.")
   @vc_expected
+  @action
   async def skip(self, ctx):
     try:
       self.skipped = ctx
@@ -97,12 +135,14 @@ class Music(commands.Cog):
 
   @commands.command(name="leave", description="Tells the bot to leave the voice channel.")
   @vc_expected
+  @action
   async def leave(self, ctx, args):
     await self.vc.disconnect()
     self.vc = None
 
 
   @commands.slash_command(description="Play a song. Unpauses if paused.")
+  @action
   async def play(self, ctx, song_title: discord.Option(str, description="Enter the title or url of the song you want to play.") = None):
     await ctx.defer()
 
