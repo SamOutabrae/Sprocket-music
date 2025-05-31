@@ -19,6 +19,8 @@ class Music(commands.Cog):
     self.skipped = None
     self.last_action = None
 
+    self.leave_if_inactive.start()
+
   def vc_expected(f):
     @wraps(f)
     async def wrapped(self, ctx, *args, **kwargs):
@@ -48,6 +50,7 @@ class Music(commands.Cog):
   @commands.Cog.listener()
   async def on_wavelink_track_end(self, node):
     if not self.vc.queue.is_empty:
+      self.last_action = datetime.datetime.now()
       next_track = self.vc.queue.get()
       await self.vc.play(next_track)
 
@@ -71,18 +74,20 @@ class Music(commands.Cog):
     if self.last_action is None:
       return
     
+    if self.vc is None or self.vc.playing:
+      return
+    
     now = datetime.datetime.now()
     diff = now - self.last_action
 
     TIMEOUT = datetime.timedelta(minutes=15)
     if diff > TIMEOUT:
-      if self.vc is not None and self.vc.connected():
-        await self.vc.disconnect()
-        self.vc = None
-        self.last_action = None
+      await self.vc.disconnect()
+      self.vc = None
+      self.last_action = None
 
-        if self.last_channel is not None:
-          await self.last_channel.send("Bot has been inactive for the last 15 minutes. Leaving channel.")
+      if self.last_channel is not None:
+        await self.bot.get_channel(self.last_channel).send("Bot has been inactive for the last 15 minutes. Leaving channel.")
         
 
 
