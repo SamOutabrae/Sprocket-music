@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 
-from musiccontrol import Music
+from .musiccontrol import Music
 
 # Specify the intents for this module
 def get_intents() -> discord.Intents:

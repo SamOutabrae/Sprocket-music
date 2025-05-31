@@ -5,15 +5,16 @@ import wavelink
 
 from functools import wraps
 
-from config import CONFIG
+from .config import CONFIG
 
-from ui import create_song_embed, create_queue_embed
+from .ui import create_song_embed, create_queue_embed
 
 class Music(commands.Cog):
   def __init__(self, bot: commands.Bot):
     self.bot = bot
     self.vc = None
     self.last_channel = None
+    self.skipped = None
 
   def vc_expected(f):
     @wraps(f)
@@ -35,8 +36,16 @@ class Music(commands.Cog):
 
   @commands.Cog.listener()
   async def on_wavelink_track_end(self, node):
-    pass
+    if not self.vc.queue.is_empty:
+      next_track = self.vc.queue.get()
+      await self.vc.play(next_track)
 
+      #check if the song ended or if someone ran skip command
+      if self.skipped is not None:
+        await self.skipped.respond(embed=create_song_embed(next_track))
+        self.skipped = None
+      else:
+        await self.bot.get_channel(self.last_channel).send(embed=create_song_embed(next_track))
 
   async def connect_nodes(self):
     await self.bot.wait_until_ready()
@@ -80,9 +89,8 @@ class Music(commands.Cog):
   @vc_expected
   async def skip(self, ctx):
     try:
+      self.skipped = ctx
       await self.vc.skip()
-      await self.vc.play(self.vc.queue.get())
-      await ctx.respond("Skipped!", embed=create_song_embed(self.vc.current, self.vc))
     except wavelink.QueueEmpty:
       await self.vc.stop()
       await ctx.respond("The queue is empty, so nothing else will be played.")
